@@ -30,9 +30,10 @@ app.post("/api/appeal-check", async (req, res) => {
     const response = await openai.responses.create({
       model: "gpt-4.1-mini",
       input: prompt,
-      text: { format: { type: "json" } },
+      text: { format: { type: "json_object" } },
       temperature: 0.3,
     });
+    
     const result = JSON.parse(response.output_text);
     res.json(result);
   } catch (error) {
