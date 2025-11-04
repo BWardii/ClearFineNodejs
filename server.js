@@ -17,8 +17,7 @@ app.use(cors());
 app.use(express.json());
 app.use(fileUpload({
   limits: { fileSize: 50 * 1024 * 1024 },
-  useTempFiles: true,
-  tempFileDir: '/tmp/'
+  useTempFiles: false // Disable temp files - keep in memory
 }));
 
 // Health check endpoint
@@ -30,60 +29,38 @@ app.get('/health', (req, res) => {
 app.post('/api/extract-fine', async (req, res) => {
   try {
     console.log('=== Extract Fine Request Received ===');
-    console.log('Files received:', req.files ? Object.keys(req.files) : 'NO FILES');
-    console.log('Body:', req.body);
+    console.log('Files:', req.files ? Object.keys(req.files) : 'NONE');
     
     if (!req.files || !req.files.image) {
-      console.error('ERROR: No image file found');
-      return res.status(400).json({ 
-        error: 'Missing required file: image file is required' 
-      });
+      console.error('ERROR: No image file');
+      return res.status(400).json({ error: 'No image file provided' });
     }
 
     const imageFile = req.files.image;
-    console.log('Image file name:', imageFile.name);
-    console.log('Image MIME type:', imageFile.mimetype);
-    console.log('Image data type:', typeof imageFile.data);
-    console.log('Image data length:', imageFile.data ? imageFile.data.length : 'NO DATA');
+    const imageBuffer = imageFile.data;
+
+    console.log(`File: ${imageFile.name}`);
+    console.log(`MIME: ${imageFile.mimetype}`);
+    console.log(`Buffer size: ${imageBuffer.length} bytes`);
     
-    // Validate file is actually an image
-    if (!imageFile.mimetype || !imageFile.mimetype.startsWith('image/')) {
-      console.error('ERROR: Invalid MIME type:', imageFile.mimetype);
-      return res.status(400).json({
-        error: 'Invalid file type',
-        details: 'File must be an image (JPEG, PNG, etc.)'
-      });
+    // Validate we have actual data
+    if (!imageBuffer || imageBuffer.length === 0) {
+      console.error('ERROR: Image buffer is empty');
+      return res.status(400).json({ error: 'Image file is empty' });
     }
 
-    // Get image data
-    let imageData = imageFile.data;
-    console.log('Image data before conversion:', imageData ? 'EXISTS' : 'NULL');
-    
-    if (!imageData) {
-      console.error('ERROR: No image data');
-      return res.status(400).json({
-        error: 'Failed to read image',
-        details: 'Image file appears to be empty'
-      });
-    }
+    // Convert to base64
+    const base64Image = imageBuffer.toString('base64');
+    console.log(`Base64 length: ${base64Image.length}`);
 
-    // Convert to base64 - keep it simple
-    const base64Image = imageData.toString('base64');
-    console.log('Base64 length:', base64Image.length);
-    
-    // Validate base64 is not empty
     if (!base64Image || base64Image.length === 0) {
-      console.error('ERROR: Base64 string is empty');
-      return res.status(400).json({
-        error: 'Failed to encode image',
-        details: 'Image data could not be properly encoded'
-      });
+      console.error('ERROR: Failed to encode to base64');
+      return res.status(400).json({ error: 'Failed to process image' });
     }
 
-    const imageMediaType = imageFile.mimetype;
-    console.log(`✓ Processing image: ${imageFile.name}, MIME: ${imageMediaType}, Size: ${imageData.length} bytes, Base64 length: ${base64Image.length}`);
+    console.log('✓ Image data ready, calling OpenAI...');
 
-    // Call OpenAI Vision API to extract parking fine data
+    // Call OpenAI Vision API
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -92,29 +69,19 @@ app.post('/api/extract-fine', async (req, res) => {
           content: [
             {
               type: "text",
-              text: `You are an expert at extracting information from parking fine notices. 
-              
-Please analyze this parking fine image and extract the following information:
-1. Fine Amount (numerical value, e.g., 65.00)
-2. Infraction Date (date the violation occurred, format: YYYY-MM-DD or as shown on fine)
-3. Location Address (where the violation occurred)
-4. Car Registration (vehicle registration plate number)
-5. Fine Reference Number (PCN, reference number, ticket number, or similar identifier)
+              text: `Extract parking fine information from this image. Return JSON with:
+- fineAmount: numeric value (e.g., "65.00")
+- infractionDate: YYYY-MM-DD format
+- locationAddress: parking location
+- carRegistration: vehicle plate
+- fineReferenceNumber: ticket/reference number
 
-Return the data as a JSON object with these exact keys:
-- fineAmount (string, e.g., "65.00")
-- infractionDate (string, date format)
-- locationAddress (string)
-- carRegistration (string)
-- fineReferenceNumber (string)
-
-If any field cannot be found, use null for that field.
-Return ONLY valid JSON, no additional text.`
+Return ONLY valid JSON object.`
             },
             {
               type: "image_url",
               image_url: {
-                url: `data:${imageMediaType};base64,${base64Image}`,
+                url: `data:${imageFile.mimetype};base64,${base64Image}`,
                 detail: "auto"
               }
             }
@@ -125,24 +92,13 @@ Return ONLY valid JSON, no additional text.`
       max_tokens: 500
     });
 
-    const extractedText = response.choices[0].message.content;
     console.log('✓ OpenAI response received');
+    const extractedText = response.choices[0].message.content;
 
-    // Parse the JSON response from OpenAI
-    let extractedData;
-    try {
-      extractedData = JSON.parse(extractedText);
-      console.log('✓ Successfully parsed extracted data');
-    } catch (parseError) {
-      console.error('ERROR: Failed to parse OpenAI response:', extractedText);
-      return res.status(400).json({
-        error: 'Failed to parse extraction data',
-        details: 'Could not extract valid data from the image'
-      });
-    }
+    // Parse JSON
+    const extractedData = JSON.parse(extractedText);
+    console.log('✓ Data extracted successfully');
 
-    // Return structured response that iOS app expects
-    console.log('✓ Returning success response');
     res.json({
       success: true,
       data: {
@@ -155,7 +111,7 @@ Return ONLY valid JSON, no additional text.`
     });
 
   } catch (error) {
-    console.error('ERROR processing fine extraction:', error);
+    console.error('ERROR:', error.message);
     res.status(500).json({ 
       error: 'Failed to extract fine data',
       details: error.message 
