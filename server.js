@@ -29,16 +29,26 @@ app.get('/health', (req, res) => {
 // Extract fine data from image using OpenAI Vision
 app.post('/api/extract-fine', async (req, res) => {
   try {
+    console.log('=== Extract Fine Request Received ===');
+    console.log('Files received:', req.files ? Object.keys(req.files) : 'NO FILES');
+    console.log('Body:', req.body);
+    
     if (!req.files || !req.files.image) {
+      console.error('ERROR: No image file found');
       return res.status(400).json({ 
         error: 'Missing required file: image file is required' 
       });
     }
 
     const imageFile = req.files.image;
+    console.log('Image file name:', imageFile.name);
+    console.log('Image MIME type:', imageFile.mimetype);
+    console.log('Image data type:', typeof imageFile.data);
+    console.log('Image data length:', imageFile.data ? imageFile.data.length : 'NO DATA');
     
     // Validate file is actually an image
     if (!imageFile.mimetype || !imageFile.mimetype.startsWith('image/')) {
+      console.error('ERROR: Invalid MIME type:', imageFile.mimetype);
       return res.status(400).json({
         error: 'Invalid file type',
         details: 'File must be an image (JPEG, PNG, etc.)'
@@ -46,15 +56,24 @@ app.post('/api/extract-fine', async (req, res) => {
     }
 
     // Get image data
-    const imageData = Buffer.isBuffer(imageFile.data) 
-      ? imageFile.data 
-      : Buffer.from(imageFile.data);
+    let imageData = imageFile.data;
+    console.log('Image data before conversion:', imageData ? 'EXISTS' : 'NULL');
+    
+    if (!imageData) {
+      console.error('ERROR: No image data');
+      return res.status(400).json({
+        error: 'Failed to read image',
+        details: 'Image file appears to be empty'
+      });
+    }
 
-    // Convert to base64
+    // Convert to base64 - keep it simple
     const base64Image = imageData.toString('base64');
+    console.log('Base64 length:', base64Image.length);
     
     // Validate base64 is not empty
     if (!base64Image || base64Image.length === 0) {
+      console.error('ERROR: Base64 string is empty');
       return res.status(400).json({
         error: 'Failed to encode image',
         details: 'Image data could not be properly encoded'
@@ -62,8 +81,7 @@ app.post('/api/extract-fine', async (req, res) => {
     }
 
     const imageMediaType = imageFile.mimetype;
-    
-    console.log(`Processing image: ${imageFile.name}, MIME: ${imageMediaType}, Size: ${imageData.length} bytes`);
+    console.log(`✓ Processing image: ${imageFile.name}, MIME: ${imageMediaType}, Size: ${imageData.length} bytes, Base64 length: ${base64Image.length}`);
 
     // Call OpenAI Vision API to extract parking fine data
     const response = await openai.chat.completions.create({
@@ -108,13 +126,15 @@ Return ONLY valid JSON, no additional text.`
     });
 
     const extractedText = response.choices[0].message.content;
+    console.log('✓ OpenAI response received');
 
     // Parse the JSON response from OpenAI
     let extractedData;
     try {
       extractedData = JSON.parse(extractedText);
+      console.log('✓ Successfully parsed extracted data');
     } catch (parseError) {
-      console.error('Failed to parse OpenAI response:', extractedText);
+      console.error('ERROR: Failed to parse OpenAI response:', extractedText);
       return res.status(400).json({
         error: 'Failed to parse extraction data',
         details: 'Could not extract valid data from the image'
@@ -122,6 +142,7 @@ Return ONLY valid JSON, no additional text.`
     }
 
     // Return structured response that iOS app expects
+    console.log('✓ Returning success response');
     res.json({
       success: true,
       data: {
@@ -134,7 +155,7 @@ Return ONLY valid JSON, no additional text.`
     });
 
   } catch (error) {
-    console.error('Error processing fine extraction:', error);
+    console.error('ERROR processing fine extraction:', error);
     res.status(500).json({ 
       error: 'Failed to extract fine data',
       details: error.message 
