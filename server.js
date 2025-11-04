@@ -36,9 +36,34 @@ app.post('/api/extract-fine', async (req, res) => {
     }
 
     const imageFile = req.files.image;
-    const imageBuffer = imageFile.data;
-    const base64Image = imageBuffer.toString('base64');
-    const imageMediaType = imageFile.mimetype || 'image/jpeg';
+    
+    // Validate file is actually an image
+    if (!imageFile.mimetype || !imageFile.mimetype.startsWith('image/')) {
+      return res.status(400).json({
+        error: 'Invalid file type',
+        details: 'File must be an image (JPEG, PNG, etc.)'
+      });
+    }
+
+    // Get image data
+    const imageData = Buffer.isBuffer(imageFile.data) 
+      ? imageFile.data 
+      : Buffer.from(imageFile.data);
+
+    // Convert to base64
+    const base64Image = imageData.toString('base64');
+    
+    // Validate base64 is not empty
+    if (!base64Image || base64Image.length === 0) {
+      return res.status(400).json({
+        error: 'Failed to encode image',
+        details: 'Image data could not be properly encoded'
+      });
+    }
+
+    const imageMediaType = imageFile.mimetype;
+    
+    console.log(`Processing image: ${imageFile.name}, MIME: ${imageMediaType}, Size: ${imageData.length} bytes`);
 
     // Call OpenAI Vision API to extract parking fine data
     const response = await openai.chat.completions.create({
@@ -89,6 +114,7 @@ Return ONLY valid JSON, no additional text.`
     try {
       extractedData = JSON.parse(extractedText);
     } catch (parseError) {
+      console.error('Failed to parse OpenAI response:', extractedText);
       return res.status(400).json({
         error: 'Failed to parse extraction data',
         details: 'Could not extract valid data from the image'
