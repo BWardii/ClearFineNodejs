@@ -1,8 +1,6 @@
-// server.js
-
 const express = require('express');
 const cors = require('cors');
-const fileUpload = require('express-fileupload'); // for image uploads
+const fileUpload = require('express-fileupload');
 const OpenAI = require('openai');
 require('dotenv').config();
 
@@ -17,26 +15,123 @@ const openai = new OpenAI({
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(fileUpload()); // enable file upload for /extract-fine
+app.use(fileUpload({
+  limits: { fileSize: 50 * 1024 * 1024 },
+  useTempFiles: true,
+  tempFileDir: '/tmp/'
+}));
 
-// ------------------ Health check ------------------
+// Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', message: 'Appeal AI Backend is running' });
 });
 
-// ------------------ Appeal check endpoint ------------------
+// Extract fine data from image using OpenAI Vision
+app.post('/api/extract-fine', async (req, res) => {
+  try {
+    if (!req.files || !req.files.image) {
+      return res.status(400).json({ 
+        error: 'Missing required file: image file is required' 
+      });
+    }
+
+    const imageFile = req.files.image;
+    const imageBuffer = imageFile.data;
+    const base64Image = imageBuffer.toString('base64');
+    const imageMediaType = imageFile.mimetype || 'image/jpeg';
+
+    // Call OpenAI Vision API to extract parking fine data
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `You are an expert at extracting information from parking fine notices. 
+              
+Please analyze this parking fine image and extract the following information:
+1. Fine Amount (numerical value, e.g., 65.00)
+2. Infraction Date (date the violation occurred, format: YYYY-MM-DD or as shown on fine)
+3. Location Address (where the violation occurred)
+4. Car Registration (vehicle registration plate number)
+5. Fine Reference Number (PCN, reference number, ticket number, or similar identifier)
+
+Return the data as a JSON object with these exact keys:
+- fineAmount (string, e.g., "65.00")
+- infractionDate (string, date format)
+- locationAddress (string)
+- carRegistration (string)
+- fineReferenceNumber (string)
+
+If any field cannot be found, use null for that field.
+Return ONLY valid JSON, no additional text.`
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:${imageMediaType};base64,${base64Image}`,
+                detail: "auto"
+              }
+            }
+          ]
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 500
+    });
+
+    const extractedText = response.choices[0].message.content;
+
+    // Parse the JSON response from OpenAI
+    let extractedData;
+    try {
+      extractedData = JSON.parse(extractedText);
+    } catch (parseError) {
+      return res.status(400).json({
+        error: 'Failed to parse extraction data',
+        details: 'Could not extract valid data from the image'
+      });
+    }
+
+    // Return structured response that iOS app expects
+    res.json({
+      success: true,
+      data: {
+        fineAmount: extractedData.fineAmount || "",
+        infractionDate: extractedData.infractionDate || "",
+        locationAddress: extractedData.locationAddress || "",
+        carRegistration: extractedData.carRegistration || "",
+        fineReferenceNumber: extractedData.fineReferenceNumber || ""
+      }
+    });
+
+  } catch (error) {
+    console.error('Error processing fine extraction:', error);
+    res.status(500).json({ 
+      error: 'Failed to extract fine data',
+      details: error.message 
+    });
+  }
+});
+
+// Appeal check endpoint
 app.post('/api/appeal-check', async (req, res) => {
   try {
     const { fineDetails, appealReason } = req.body;
     
+    // Validate request data
     if (!fineDetails || !appealReason) {
       return res.status(400).json({ 
         error: 'Missing required fields: fineDetails and appealReason are required' 
       });
     }
 
+    // Create the prompt for ChatGPT
     const prompt = createAppealPrompt(fineDetails, appealReason);
-
+    
+    // Call ChatGPT API
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -54,11 +149,13 @@ app.post('/api/appeal-check', async (req, res) => {
     });
 
     const response = completion.choices[0].message.content;
-
+    
+    // Try to parse the JSON response
     let appealAnalysis;
     try {
       appealAnalysis = JSON.parse(response);
     } catch (parseError) {
+      // If JSON parsing fails, create a fallback response
       appealAnalysis = {
         appeal_strength: "medium",
         confidence_score: 50,
@@ -66,6 +163,7 @@ app.post('/api/appeal-check', async (req, res) => {
       };
     }
 
+    // Validate the response structure
     if (!appealAnalysis.appeal_strength || !appealAnalysis.confidence_score || !appealAnalysis.reasoning_summary) {
       throw new Error('Invalid response structure from AI');
     }
@@ -116,52 +214,7 @@ Respond with only the JSON object, no additional text.
   `.trim();
 }
 
-// ------------------ Parking fine image extraction endpoint ------------------
-app.post("/api/extract-fine", async (req, res) => {
-  try {
-    const file = req.files?.image;
-    if (!file) return res.status(400).json({ error: "No image uploaded" });
-
-    const base64 = file.data.toString("base64");
-
-    const instruction = `
-You are a data extraction agent.
-Extract the following fields from the parking fine letter in the image:
-
-- fineAmount (include currency)
-- infractionDate (YYYY-MM-DD)
-- locationAddress
-- carRegistration
-- fineReferenceNumber
-
-Return ONLY a valid JSON object. If any field is missing, use an empty string.
-`;
-
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: instruction },
-            { type: "image_url", image_url: `data:${file.mimetype};base64,${base64}` },
-          ],
-        },
-      ],
-      temperature: 0,
-      response_format: { type: "json_object" },
-    });
-
-    const result = completion.choices[0].message.content;
-    res.json(JSON.parse(result));
-
-  } catch (error) {
-    console.error("Extraction error:", error);
-    res.status(500).json({ error: "Failed to extract fine data" });
-  }
-});
-
-// ------------------ Error handling middleware ------------------
+// Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
   res.status(500).json({ 
@@ -170,7 +223,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-// ------------------ Start server ------------------
+// Start server
 app.listen(port, () => {
   console.log(`🚀 Appeal AI Backend running on port ${port}`);
   console.log(`📊 Health check: http://localhost:${port}/health`);
