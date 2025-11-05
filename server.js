@@ -17,7 +17,7 @@ app.use(cors());
 app.use(express.json());
 app.use(fileUpload({
   limits: { fileSize: 50 * 1024 * 1024 },
-  useTempFiles: false // Disable temp files - keep in memory
+  useTempFiles: false
 }));
 
 // Health check endpoint
@@ -76,7 +76,7 @@ app.post('/api/extract-fine', async (req, res) => {
 - carRegistration: vehicle plate
 - fineReferenceNumber: ticket/reference number
 
-Return ONLY valid JSON object.`
+Return ONLY valid JSON object, no markdown, no code blocks.`
             },
             {
               type: "image_url",
@@ -89,11 +89,20 @@ Return ONLY valid JSON object.`
         }
       ],
       temperature: 0.3,
-      max_tokens: 500
+      max_tokens: 500,
+      response_format: { type: "json_object" }
     });
 
     console.log('✓ OpenAI response received');
-    const extractedText = response.choices[0].message.content;
+    let extractedText = response.choices[0].message.content;
+
+    // Remove markdown code blocks if present
+    extractedText = extractedText
+      .replace(/```json\n?/g, '')
+      .replace(/```\n?/g, '')
+      .trim();
+
+    console.log('Cleaned response:', extractedText);
 
     // Parse JSON
     const extractedData = JSON.parse(extractedText);
@@ -235,3 +244,5 @@ app.listen(port, () => {
 });
 
 module.exports = app;
+
+
