@@ -43,13 +43,11 @@ app.post('/api/extract-fine', async (req, res) => {
     console.log(`MIME: ${imageFile.mimetype}`);
     console.log(`Buffer size: ${imageBuffer.length} bytes`);
     
-    // Validate we have actual data
     if (!imageBuffer || imageBuffer.length === 0) {
       console.error('ERROR: Image buffer is empty');
       return res.status(400).json({ error: 'Image file is empty' });
     }
 
-    // Convert to base64
     const base64Image = imageBuffer.toString('base64');
     console.log(`Base64 length: ${base64Image.length}`);
 
@@ -60,7 +58,6 @@ app.post('/api/extract-fine', async (req, res) => {
 
     console.log('✓ Image data ready, calling OpenAI...');
 
-    // Call OpenAI Vision API
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -112,7 +109,6 @@ NO markdown, NO code blocks, NO explanations. Only valid JSON.`
     console.log('✓ OpenAI response received');
     let extractedText = response.choices[0].message.content;
 
-    // Remove markdown code blocks if present
     extractedText = extractedText
       .replace(/```json\n?/g, '')
       .replace(/```\n?/g, '')
@@ -120,7 +116,6 @@ NO markdown, NO code blocks, NO explanations. Only valid JSON.`
 
     console.log('Cleaned response:', extractedText);
 
-    // Parse JSON
     const extractedData = JSON.parse(extractedText);
     console.log('✓ Data extracted successfully');
 
@@ -150,17 +145,14 @@ app.post('/api/appeal-check', async (req, res) => {
   try {
     const { fineDetails, appealReason } = req.body;
     
-    // Validate request data
     if (!fineDetails || !appealReason) {
       return res.status(400).json({ 
         error: 'Missing required fields: fineDetails and appealReason are required' 
       });
     }
 
-    // Create the prompt for ChatGPT
     const prompt = createAppealPrompt(fineDetails, appealReason);
     
-    // Call ChatGPT API
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -179,12 +171,10 @@ app.post('/api/appeal-check', async (req, res) => {
 
     const response = completion.choices[0].message.content;
     
-    // Try to parse the JSON response
     let appealAnalysis;
     try {
       appealAnalysis = JSON.parse(response);
     } catch (parseError) {
-      // If JSON parsing fails, create a fallback response
       appealAnalysis = {
         appeal_strength: "medium",
         confidence_score: 50,
@@ -192,7 +182,6 @@ app.post('/api/appeal-check', async (req, res) => {
       };
     }
 
-    // Validate the response structure
     if (!appealAnalysis.appeal_strength || !appealAnalysis.confidence_score || !appealAnalysis.reasoning_summary) {
       throw new Error('Invalid response structure from AI');
     }
@@ -208,7 +197,6 @@ app.post('/api/appeal-check', async (req, res) => {
   }
 });
 
-// Helper function to create the prompt
 function createAppealPrompt(fineDetails, appealReason) {
   return `
 Please analyze this parking fine appeal case:
@@ -243,7 +231,6 @@ Respond with only the JSON object, no additional text.
   `.trim();
 }
 
-// Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
   res.status(500).json({ 
@@ -252,7 +239,6 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start server
 app.listen(port, () => {
   console.log(`🚀 Appeal AI Backend running on port ${port}`);
   console.log(`📊 Health check: http://localhost:${port}/health`);
@@ -261,22 +247,3 @@ app.listen(port, () => {
 });
 
 module.exports = app;
-```
-
----
-
-## ✅ **Fix It**
-
-1. Go to GitHub → `backend/server.js`
-2. **Delete all the Swift code** (the `FineExtractionService.swift` and `FineEntryViewModel.swift` content)
-3. **Replace with ONLY the JavaScript code above** (backend/server.js only)
-4. Commit and push
-5. Render will auto-deploy
-
----
-
-## 📝 **Important**
-
-The **Swift files** (`FineExtractionService.swift` and `FineEntryViewModel.swift`) go in your **iOS project** in Xcode, NOT in the backend GitHub repo. They should be added separately to your iOS Xcode project. 
-
-Backend only needs the Node.js/JavaScript code! 🚀
