@@ -69,14 +69,30 @@ app.post('/api/extract-fine', async (req, res) => {
           content: [
             {
               type: "text",
-              text: `Extract parking fine information from this image. Return JSON with:
-- fineAmount: numeric value (e.g., "65.00")
-- infractionDate: YYYY-MM-DD format
-- locationAddress: parking location
-- carRegistration: vehicle plate
-- fineReferenceNumber: ticket/reference number
+              text: `You are an expert at extracting parking fine information from official parking fine letters.
 
-Return ONLY valid JSON object, no markdown, no code blocks.`
+Extract the following fields from this parking fine image:
+
+1. fineAmount - The penalty charge amount (numeric value, e.g., "160" or "65.00")
+2. infractionDate - The date the violation occurred (format: YYYY-MM-DD)
+3. locationAddress - The exact parking location where violation occurred
+4. carRegistration - The VEHICLE REGISTRATION NUMBER (UK number plate format, e.g., "CH15ANN" or "RE22DTE"). 
+   IMPORTANT: Look for text like "Vehicle registration number:" or "Registration:" and extract the exact plate number shown.
+   This is usually clearly stated in the letter. Be very accurate.
+5. fineReferenceNumber - The ticket/reference number (e.g., "EF99300708")
+6. allegedContravention - The reason for the fine/alleged contravention (e.g., "52(m) Falling to comply with a prohibition on certain types of vehicle" or the full contravention text)
+
+Return ONLY a valid JSON object with these exact keys:
+{
+  "fineAmount": "value",
+  "infractionDate": "YYYY-MM-DD",
+  "locationAddress": "value",
+  "carRegistration": "value",
+  "fineReferenceNumber": "value",
+  "allegedContravention": "value"
+}
+
+NO markdown, NO code blocks, NO explanations. Only valid JSON.`
             },
             {
               type: "image_url",
@@ -115,7 +131,8 @@ Return ONLY valid JSON object, no markdown, no code blocks.`
         infractionDate: extractedData.infractionDate || "",
         locationAddress: extractedData.locationAddress || "",
         carRegistration: extractedData.carRegistration || "",
-        fineReferenceNumber: extractedData.fineReferenceNumber || ""
+        fineReferenceNumber: extractedData.fineReferenceNumber || "",
+        allegedContravention: extractedData.allegedContravention || ""
       }
     });
 
@@ -244,5 +261,31 @@ app.listen(port, () => {
 });
 
 module.exports = app;
+```
 
+---
 
+## ✅ **Push to GitHub**
+
+```bash
+git add backend/server.js clearFine/Services/FineExtractionService.swift clearFine/ViewModels/FineEntryViewModel.swift
+git commit -m "Add alleged contravention extraction and improve vehicle registration accuracy"
+git push origin main
+```
+
+---
+
+## 📊 **Field Mapping Summary**
+
+| Backend | iOS Field | Example |
+|---------|-----------|---------|
+| `fineAmount` | `amount` | 160 |
+| `infractionDate` | `issueDate` | 2025-09-14 |
+| `locationAddress` | `location` | BRIDGE ROAD/FORE STREET N9 |
+| `carRegistration` | `vehicleRegistration` | CH15ANN |
+| `fineReferenceNumber` | `referenceNumber` | EF99300708 |
+| `allegedContravention` | `offenseDescription` | 52(m) Falling to comply... |
+
+---
+
+Test now! The form should auto-populate all 6 fields including the offense description. 🚀
