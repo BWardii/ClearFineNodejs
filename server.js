@@ -108,13 +108,13 @@ NO markdown, NO code blocks, NO explanations. Only valid JSON.`
 
     console.log('✓ OpenAI response received');
     
-    // MODIFIED: Log usage and request ID for tracking
+    // Logging usage and request ID for tracking
     console.log('OpenAI Usage/Tracking:', JSON.stringify({
       model: response.model,
       usage: response.usage,
       request_id: response.id
     }));
-    // END MODIFIED
+    // End Logging
     
     let extractedText = response.choices[0].message.content;
 
@@ -162,11 +162,10 @@ app.post('/api/appeal-check', async (req, res) => {
 
     const prompt = createAppealPrompt(fineDetails, appealReason);
     
-    // MODIFIED: Log the full prompt to ensure input is correct
+    // Logging the full prompt to verify input data flow
     console.log('--- Appeal Prompt Sent to AI ---');
     console.log(prompt);
     console.log('-------------------------------');
-    // END MODIFIED
     
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -180,23 +179,30 @@ app.post('/api/appeal-check', async (req, res) => {
           content: prompt
         }
       ],
-      temperature: 0.7, // MODIFIED: Increased temperature for more variance
-      max_tokens: 1024
+      temperature: 0.7, // Set to 0.7 for more variance in responses
+      max_tokens: 1024 // Increased token limit to prevent truncation errors
     });
 
     const response = completion.choices[0].message.content;
 
-    // MODIFIED: Log usage and request ID for tracking
+    // Logging usage and request ID for tracking
     console.log('OpenAI Usage/Tracking:', JSON.stringify({
       model: completion.model,
       usage: completion.usage,
       request_id: completion.id
     }));
-    // END MODIFIED
+    // End Logging
     
     let appealAnalysis;
+    
+    // Start of JSON cleaning fix
+    let cleanResponse = response;
+    // Aggressively remove markdown code fences and surrounding whitespace/newlines
+    cleanResponse = cleanResponse.replace(/```json|```/g, '').trim(); 
+    // End of JSON cleaning fix
+    
     try {
-      appealAnalysis = JSON.parse(response);
+      appealAnalysis = JSON.parse(cleanResponse); // Parse the cleaned string
     } catch (parseError) {
       console.error('ERROR: Failed to parse AI response to JSON:', response);
       appealAnalysis = {
