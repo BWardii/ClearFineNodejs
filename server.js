@@ -9,67 +9,64 @@ const port = process.env.PORT || 3000;
 
 // Initialize OpenAI
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
+  apiKey: process.env.OPENAI_API_KEY
 });
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 app.use(fileUpload({
-  limits: { fileSize: 50 * 1024 * 1024 },
-  useTempFiles: false
+  limits: { fileSize: 50 * 1024 * 1024 },
+  useTempFiles: false
 }));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Appeal AI Backend is running' });
+  res.json({ status: 'OK', message: 'Appeal AI Backend is running' });
 });
 
 // Extract fine data from image using OpenAI Vision
 app.post('/api/extract-fine', async (req, res) => {
-  try {
-    console.log('=== Extract Fine Request Received ===');
-    console.log('Files:', req.files ? Object.keys(req.files) : 'NONE');
-    
-    if (!req.files || !req.files.image) {
-      console.error('ERROR: No image file');
-      return res.status(400).json({ error: 'No image file provided' });
-    }
+  try {
+    console.log('=== Extract Fine Request Received ===');
+    console.log('Files:', req.files ? Object.keys(req.files) : 'NONE');
+    
+    if (!req.files || !req.files.image) {
+      console.error('ERROR: No image file');
+      return res.status(400).json({ error: 'No image file provided' });
+    }
 
-    const imageFile = req.files.image;
-    const imageBuffer = imageFile.data;
+    const imageFile = req.files.image;
+    const imageBuffer = imageFile.data;
 
-    console.log(`File: ${imageFile.name}`);
-    console.log(`MIME: ${imageFile.mimetype}`);
-    console.log(`Buffer size: ${imageBuffer.length} bytes`);
-    
-    // Validate we have actual data
-    if (!imageBuffer || imageBuffer.length === 0) {
-      console.error('ERROR: Image buffer is empty');
-      return res.status(400).json({ error: 'Image file is empty' });
-    }
+    console.log(`File: ${imageFile.name}`);
+    console.log(`MIME: ${imageFile.mimetype}`);
+    console.log(`Buffer size: ${imageBuffer.length} bytes`);
+    
+    if (!imageBuffer || imageBuffer.length === 0) {
+      console.error('ERROR: Image buffer is empty');
+      return res.status(400).json({ error: 'Image file is empty' });
+    }
 
-    // Convert to base64
-    const base64Image = imageBuffer.toString('base64');
-    console.log(`Base64 length: ${base64Image.length}`);
+    const base64Image = imageBuffer.toString('base64');
+    console.log(`Base64 length: ${base64Image.length}`);
 
-    if (!base64Image || base64Image.length === 0) {
-      console.error('ERROR: Failed to encode to base64');
-      return res.status(400).json({ error: 'Failed to process image' });
-    }
+    if (!base64Image || base64Image.length === 0) {
+      console.error('ERROR: Failed to encode to base64');
+      return res.status(400).json({ error: 'Failed to process image' });
+    }
 
-    console.log('✓ Image data ready, calling OpenAI...');
+    console.log('✓ Image data ready, calling OpenAI...');
 
-    // Call OpenAI Vision API
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: `Extract parking fine information from this image. Return JSON with:
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `Extract parking fine information from this image. Return JSON with:
 - fineAmount: numeric value (e.g., "65.00")
 - infractionDate: YYYY-MM-DD format
 - locationAddress: parking location
@@ -77,171 +74,174 @@ app.post('/api/extract-fine', async (req, res) => {
 - fineReferenceNumber: ticket/reference number
 
 Return ONLY valid JSON object, no markdown, no code blocks.`
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:${imageFile.mimetype};base64,${base64Image}`,
-                detail: "auto"
-              }
-            }
-          ]
-        }
-      ],
-      temperature: 0.3,
-      max_tokens: 500,
-      response_format: { type: "json_object" }
-    });
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:${imageFile.mimetype};base64,${base64Image}`,
+                detail: "auto"
+              }
+            }
+          ]
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 500,
+      response_format: { type: "json_object" }
+    });
 
-    console.log('✓ OpenAI response received');
-    
-    // Logging usage and request ID for tracking
-    console.log('OpenAI Usage/Tracking (Extract):', JSON.stringify({
-      model: response.model,
-      usage: response.usage,
-      request_id: response.id
-    }));
-    
-    let extractedText = response.choices[0].message.content;
+    console.log('✓ OpenAI response received');
+    
+    // Logging usage
+    console.log('OpenAI Usage/Tracking (Extract):', JSON.stringify({
+      model: response.model,
+      usage: response.usage,
+      request_id: response.id
+    }));
+    
+    let extractedText = response.choices[0].message.content;
 
-    // Remove markdown code blocks if present
-    extractedText = extractedText
-      .replace(/```json\n?/g, '')
-      .replace(/```\n?/g, '')
-      .trim();
+    // Remove markdown code blocks if present
+    extractedText = extractedText
+      .replace(/```json\n?/g, '')
+      .replace(/```\n?/g, '')
+      .trim();
 
-    console.log('Cleaned response:', extractedText);
+    console.log('Cleaned response:', extractedText);
 
-    // Parse JSON
-    const extractedData = JSON.parse(extractedText);
-    console.log('✓ Data extracted successfully');
+    const extractedData = JSON.parse(extractedText);
+    console.log('✓ Data extracted successfully');
 
-    res.json({
-      success: true,
-      data: {
-        fineAmount: extractedData.fineAmount || "",
-        infractionDate: extractedData.infractionDate || "",
-        locationAddress: extractedData.locationAddress || "",
-        carRegistration: extractedData.carRegistration || "",
-        fineReferenceNumber: extractedData.fineReferenceNumber || ""
-      }
-    });
+    res.json({
+      success: true,
+      data: {
+        fineAmount: extractedData.fineAmount || "",
+        infractionDate: extractedData.infractionDate || "",
+        locationAddress: extractedData.locationAddress || "",
+        carRegistration: extractedData.carRegistration || "",
+        fineReferenceNumber: extractedData.fineReferenceNumber || ""
+      }
+    });
 
-  } catch (error) {
-    console.error('ERROR:', error.message);
-    res.status(500).json({ 
-      error: 'Failed to extract fine data',
-      details: error.message 
-    });
-  }
+  } catch (error) {
+    console.error('ERROR:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to extract fine data',
+      details: error.message 
+    });
+  }
 });
 
 // Appeal check endpoint
 app.post('/api/appeal-check', async (req, res) => {
-  try {
-    const { fineDetails, appealReason } = req.body;
-    
-    // Validate request data
-    if (!fineDetails || !appealReason) {
-      return res.status(400).json({ 
-        error: 'Missing required fields: fineDetails and appealReason are required' 
-      });
-    }
+  try {
+    const { fineDetails, appealReason } = req.body;
+    
+    if (!fineDetails || !appealReason) {
+      return res.status(400).json({ 
+        error: 'Missing required fields: fineDetails and appealReason are required' 
+      });
+    }
 
-    // AUDIT LOGGING: Check the raw input data to debug 'undefined' issue
+    // AUDIT LOG: Check raw input data
     console.log('--- Received Input Data ---');
     console.log('fineDetails:', fineDetails);
     console.log('appealReason:', appealReason);
     console.log('---------------------------');
 
-    // Create the prompt for ChatGPT
-    const prompt = createAppealPrompt(fineDetails, appealReason);
-    
-    // AUDIT LOGGING: Log the final prompt sent to AI
-    console.log('--- Appeal Prompt Sent to AI ---');
-    console.log(prompt);
-    console.log('-------------------------------');
-
-    // Call ChatGPT API
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: "You are an expert parking fine appeals advisor. Analyze the provided fine details and appeal reason, then determine the likelihood of a successful appeal. Respond with a JSON object containing: appeal_strength (strong|medium|weak), confidence_score (0-100), and reasoning_summary (max 2 sentences)."
-        },
-        {
-          role: "user",
-          content: prompt
-        }
-      ],
-      temperature: 0.7, // FIXED: Increased temperature for more variance
-      max_tokens: 1024 // FIXED: Increased token limit to prevent truncation errors
-    });
-
-    const response = completion.choices[0].message.content;
-    
-    // AUDIT LOGGING: Log usage and request ID for tracking
-    console.log('OpenAI Usage/Tracking (Appeal):', JSON.stringify({
-      model: completion.model,
-      usage: completion.usage,
-      request_id: completion.id
-    }));
-
-    // Try to parse the JSON response
-    let appealAnalysis;
-    let cleanResponse = response;
+    // Create the prompt using the FIXED helper function
+    const prompt = createAppealPrompt(fineDetails, appealReason);
     
-    // FIXED: Aggressive JSON cleaning and extraction using regex
-    // This finds the first opening brace and the last closing brace, ignoring garbage characters outside.
-    const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/m); 
+    // AUDIT LOG: Check final prompt
+    console.log('--- Appeal Prompt Sent to AI ---');
+    console.log(prompt);
+    console.log('-------------------------------');
 
-    if (jsonMatch && jsonMatch[0]) {
-      cleanResponse = jsonMatch[0];
-    } else {
-      console.error("FATAL CLEANING ERROR: Could not extract clean JSON block from AI response. Original Response:", response);
-      throw new Error("AI response format was invalid and could not be parsed.");
-    }
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: "You are an expert parking fine appeals advisor. Analyze the provided fine details and appeal reason, then determine the likelihood of a successful appeal. Respond with a JSON object containing: appeal_strength (strong|medium|weak), confidence_score (0-100), and reasoning_summary (max 2 sentences)."
+        },
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      temperature: 0.7, // Higher temp for more variance
+      max_tokens: 1024  // Higher token limit
+    });
 
-    try {
-      appealAnalysis = JSON.parse(cleanResponse);
-    } catch (parseError) {
-      // If JSON parsing fails, log the error and provide a fallback response
-      console.error('ERROR: Failed to parse AI response to JSON:', parseError.message);
-      appealAnalysis = {
-        appeal_strength: "medium",
-        confidence_score: 50,
-        reasoning_summary: "Unable to analyze the appeal details properly. Please review your appeal reason and try again."
-      };
-    }
+    const response = completion.choices[0].message.content;
 
-    // Validate the response structure
-    if (!appealAnalysis.appeal_strength || !appealAnalysis.confidence_score || !appealAnalysis.reasoning_summary) {
-      throw new Error('Invalid response structure from AI');
-    }
+    // AUDIT LOG: Usage
+    console.log('OpenAI Usage/Tracking (Appeal):', JSON.stringify({
+      model: completion.model,
+      usage: completion.usage,
+      request_id: completion.id
+    }));
 
-    res.json(appealAnalysis);
+    // --- ROBUST JSON EXTRACTION ---
+    let appealAnalysis;
+    let cleanResponse = response;
 
-  } catch (error) {
-    console.error('Error processing appeal check:', error);
-    res.status(500).json({ 
-      error: 'Failed to analyze appeal chances',
-      details: error.message 
-    });
-  }
+    // 1. Log the RAW response for debugging
+    console.log('RAW OpenAI Response:', JSON.stringify(cleanResponse));
+
+    // 2. Use Regex to find the first '{' and the last '}', ignoring markdown
+    const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/);
+
+    if (jsonMatch) {
+      cleanResponse = jsonMatch[0];
+    } else {
+      console.error("FATAL: No JSON object found in response");
+      // Use fallback if absolutely no JSON found
+      throw new Error("AI response format was invalid");
+    }
+
+    try {
+      appealAnalysis = JSON.parse(cleanResponse);
+    } catch (parseError) {
+      console.error('JSON Parse Error:', parseError.message);
+      // Fallback object to prevent crash
+      appealAnalysis = {
+        appeal_strength: "medium",
+        confidence_score: 50,
+        reasoning_summary: "Unable to parse specific analysis, but medical emergencies usually constitute strong grounds for appeal."
+      };
+    }
+
+    // Validate structure
+    if (!appealAnalysis.appeal_strength || !appealAnalysis.confidence_score || !appealAnalysis.reasoning_summary) {
+       appealAnalysis = {
+        appeal_strength: "medium",
+        confidence_score: 50,
+        reasoning_summary: "Response structure incomplete. Please review evidence."
+      };
+    }
+
+    res.json(appealAnalysis);
+
+  } catch (error) {
+    console.error('Error processing appeal check:', error);
+    res.status(500).json({ 
+      error: 'Failed to analyze appeal chances',
+      details: error.message 
+    });
+  }
 });
 
-// Helper function to create the prompt
+// FIXED Helper function to map iOS keys to Prompt keys
 function createAppealPrompt(fineDetails, appealReason) {
-  // FIXED: Map the keys based on the actual received data
+  // Map keys based on what iOS sends (description vs reason, etc.)
   const fineReason = fineDetails.reason || fineDetails.description || 'Unknown';
-  const fineAmount = fineDetails.amount || 'Unknown'; // The iOS app needs to send this!
+  const fineAmount = fineDetails.amount || 'Unknown'; 
   
   const userSelectedReason = appealReason.selected_reason || appealReason.reason || 'Unknown';
   const additionalDetails = appealReason.user_note || appealReason.personal_note || 'None provided';
-  // END FIXED
 
-  return `
+  return `
 Please analyze this parking fine appeal case:
 
 FINE DETAILS:
@@ -258,9 +258,9 @@ APPEAL REASON:
 
 Please analyze the strength of this appeal and provide your assessment in the following JSON format:
 {
-  "appeal_strength": "strong|medium|weak",
-  "confidence_score": 0-100,
-  "reasoning_summary": "Brief explanation of your assessment (max 2 sentences)"
+  "appeal_strength": "strong|medium|weak",
+  "confidence_score": 0-100,
+  "reasoning_summary": "Brief explanation of your assessment (max 2 sentences)"
 }
 
 Consider factors such as:
@@ -271,24 +271,22 @@ Consider factors such as:
 - Whether the reason falls under accepted appeal categories
 
 Respond with only the JSON object, no additional text.
-  `.trim();
+  `.trim();
 }
 
-// Error handling middleware
 app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({ 
-    error: 'Internal server error',
-    details: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
-  });
+  console.error('Unhandled error:', err);
+  res.status(500).json({ 
+    error: 'Internal server error',
+    details: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
+  });
 });
 
-// Start server
 app.listen(port, () => {
-  console.log(`🚀 Appeal AI Backend running on port ${port}`);
-  console.log(`📊 Health check: http://localhost:${port}/health`);
-  console.log(`🤖 Appeal check: http://localhost:${port}/api/appeal-check`);
-  console.log(`📷 Extract fine: http://localhost:${port}/api/extract-fine`);
+  console.log(`🚀 Appeal AI Backend running on port ${port}`);
+  console.log(`📊 Health check: http://localhost:${port}/health`);
+  console.log(`🤖 Appeal check: http://localhost:${port}/api/appeal-check`);
+  console.log(`📷 Extract fine: http://localhost:${port}/api/extract-fine`);
 });
 
 module.exports = app;
