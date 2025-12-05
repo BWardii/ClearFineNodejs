@@ -86,14 +86,7 @@ Return ONLY valid JSON object, no markdown, no code blocks.`
               }
             }
           ]
-        },
-        // NEW LOGGING for usage/tracking on extract endpoint
-        console.log('OpenAI Usage/Tracking (Extract):', JSON.stringify({
-          model: response.model,
-          usage: response.usage,
-          request_id: response.id
-        })),
-        // END NEW LOGGING
+        }
       ],
       temperature: 0.3,
       max_tokens: 500,
@@ -101,6 +94,14 @@ Return ONLY valid JSON object, no markdown, no code blocks.`
     });
 
     console.log('✓ OpenAI response received');
+    
+    // Logging usage and request ID for tracking
+    console.log('OpenAI Usage/Tracking (Extract):', JSON.stringify({
+      model: response.model,
+      usage: response.usage,
+      request_id: response.id
+    }));
+    
     let extractedText = response.choices[0].message.content;
 
     // Remove markdown code blocks if present
@@ -146,8 +147,8 @@ app.post('/api/appeal-check', async (req, res) => {
         error: 'Missing required fields: fineDetails and appealReason are required' 
       });
     }
-    
-    // NEW AUDIT LOGGING: Check the raw input data to debug 'undefined' issue
+
+    // AUDIT LOGGING: Check the raw input data to debug 'undefined' issue
     console.log('--- Received Input Data ---');
     console.log('fineDetails:', fineDetails);
     console.log('appealReason:', appealReason);
@@ -155,8 +156,8 @@ app.post('/api/appeal-check', async (req, res) => {
 
     // Create the prompt for ChatGPT
     const prompt = createAppealPrompt(fineDetails, appealReason);
-    
-    // NEW AUDIT LOGGING: Log the final prompt sent to AI
+    
+    // AUDIT LOGGING: Log the final prompt sent to AI
     console.log('--- Appeal Prompt Sent to AI ---');
     console.log(prompt);
     console.log('-------------------------------');
@@ -167,7 +168,7 @@ app.post('/api/appeal-check', async (req, res) => {
       messages: [
         {
           role: "system",
-          content: "You are an expert parking fine appeals advisor. Analyze the provided fine details and appeal reason, then determine the likelihood of a successful appeal. Respond with a JSON object containing: appeal_strength (strong/medium|weak), confidence_score (0-100), and reasoning_summary (max 2 sentences)."
+          content: "You are an expert parking fine appeals advisor. Analyze the provided fine details and appeal reason, then determine the likelihood of a successful appeal. Respond with a JSON object containing: appeal_strength (strong|medium|weak), confidence_score (0-100), and reasoning_summary (max 2 sentences)."
         },
         {
           role: "user",
@@ -179,21 +180,21 @@ app.post('/api/appeal-check', async (req, res) => {
     });
 
     const response = completion.choices[0].message.content;
-    
-    // NEW AUDIT LOGGING: Log usage and request ID for tracking
+    
+    // AUDIT LOGGING: Log usage and request ID for tracking
     console.log('OpenAI Usage/Tracking (Appeal):', JSON.stringify({
       model: completion.model,
       usage: completion.usage,
       request_id: completion.id
     }));
-    // END NEW LOGGING
-    
+
     // Try to parse the JSON response
     let appealAnalysis;
     let cleanResponse = response;
     
     // FIXED: Aggressive JSON cleaning and extraction using regex
-    const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/m); // Capture anything between the first { and the last }
+    // This finds the first opening brace and the last closing brace, ignoring garbage characters outside.
+    const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/m); 
 
     if (jsonMatch && jsonMatch[0]) {
       cleanResponse = jsonMatch[0];
@@ -201,7 +202,6 @@ app.post('/api/appeal-check', async (req, res) => {
       console.error("FATAL CLEANING ERROR: Could not extract clean JSON block from AI response. Original Response:", response);
       throw new Error("AI response format was invalid and could not be parsed.");
     }
-    // END FIXED
 
     try {
       appealAnalysis = JSON.parse(cleanResponse);
@@ -233,6 +233,14 @@ app.post('/api/appeal-check', async (req, res) => {
 
 // Helper function to create the prompt
 function createAppealPrompt(fineDetails, appealReason) {
+  // FIXED: Map the keys based on the actual received data
+  const fineReason = fineDetails.reason || fineDetails.description || 'Unknown';
+  const fineAmount = fineDetails.amount || 'Unknown'; // The iOS app needs to send this!
+  
+  const userSelectedReason = appealReason.selected_reason || appealReason.reason || 'Unknown';
+  const additionalDetails = appealReason.user_note || appealReason.personal_note || 'None provided';
+  // END FIXED
+
   return `
 Please analyze this parking fine appeal case:
 
@@ -240,13 +248,13 @@ FINE DETAILS:
 - Contravention Code: ${fineDetails.contravention_code}
 - Location: ${fineDetails.location}
 - Date: ${fineDetails.date}
-- Amount: ${fineDetails.amount}
-- Reason: ${fineDetails.reason}
+- Amount: ${fineAmount}
+- Reason: ${fineReason}
 
 APPEAL REASON:
 - Category: ${appealReason.category}
-- Selected Reason: ${appealReason.selected_reason}
-- Additional Details: ${appealReason.user_note || 'None provided'}
+- Selected Reason: ${userSelectedReason}
+- Additional Details: ${additionalDetails}
 
 Please analyze the strength of this appeal and provide your assessment in the following JSON format:
 {
