@@ -149,7 +149,7 @@ app.post('/api/appeal-check', async (req, res) => {
     console.log('appealReason:', appealReason);
     console.log('---------------------------');
 
-    // Create the prompt using the FIXED helper function
+    // Create the prompt using the UPDATED helper function
     const prompt = createAppealPrompt(fineDetails, appealReason);
     
     // AUDIT LOG: Check final prompt
@@ -169,8 +169,8 @@ app.post('/api/appeal-check', async (req, res) => {
           content: prompt
         }
       ],
-      temperature: 0.7, // Higher temp for more variance
-      max_tokens: 1024  // Higher token limit
+      temperature: 0.7, 
+      max_tokens: 1024 
     });
 
     const response = completion.choices[0].message.content;
@@ -186,17 +186,16 @@ app.post('/api/appeal-check', async (req, res) => {
     let appealAnalysis;
     let cleanResponse = response;
 
-    // 1. Log the RAW response for debugging
+    // Log the RAW response for debugging
     console.log('RAW OpenAI Response:', JSON.stringify(cleanResponse));
 
-    // 2. Use Regex to find the first '{' and the last '}', ignoring markdown
+    // Regex to find the first '{' and the last '}'
     const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/);
 
     if (jsonMatch) {
       cleanResponse = jsonMatch[0];
     } else {
       console.error("FATAL: No JSON object found in response");
-      // Use fallback if absolutely no JSON found
       throw new Error("AI response format was invalid");
     }
 
@@ -204,7 +203,7 @@ app.post('/api/appeal-check', async (req, res) => {
       appealAnalysis = JSON.parse(cleanResponse);
     } catch (parseError) {
       console.error('JSON Parse Error:', parseError.message);
-      // Fallback object to prevent crash
+      // Fallback
       appealAnalysis = {
         appeal_strength: "medium",
         confidence_score: 50,
@@ -232,29 +231,43 @@ app.post('/api/appeal-check', async (req, res) => {
   }
 });
 
-// FIXED Helper function to map iOS keys to Prompt keys
+// --- UPDATED HELPER FUNCTION ---
 function createAppealPrompt(fineDetails, appealReason) {
-  // Map keys based on what iOS sends (description vs reason, etc.)
-  const fineReason = fineDetails.reason || fineDetails.description || 'Unknown';
+  // 1. Map Fine Details (Handling mismatch between 'date' vs 'time' and 'reason' vs 'type')
+  const fineReason = fineDetails.reason || fineDetails.description || fineDetails.type || 'Unknown';
+  const fineDate = fineDetails.date || fineDetails.time || 'Unknown';
   const fineAmount = fineDetails.amount || 'Unknown'; 
+  const contraventionCode = fineDetails.contravention_code || 'Not specified';
   
-  const userSelectedReason = appealReason.selected_reason || appealReason.reason || 'Unknown';
-  const additionalDetails = appealReason.user_note || appealReason.personal_note || 'None provided';
+  // 2. Map Appeal Reason (Handling incoming String VS incoming Object)
+  let userCategory = 'General';
+  let userSelectedReason = 'Unknown';
+  let userAdditionalDetails = 'None provided';
+
+  if (typeof appealReason === 'string') {
+    // If iOS sends just a string (e.g., "PCN Wrongly / Unfairly Issued")
+    userSelectedReason = appealReason;
+  } else if (typeof appealReason === 'object') {
+    // If iOS sends an object
+    userCategory = appealReason.category || 'General';
+    userSelectedReason = appealReason.selected_reason || appealReason.reason || 'Unknown';
+    userAdditionalDetails = appealReason.user_note || appealReason.personal_note || 'None provided';
+  }
 
   return `
 Please analyze this parking fine appeal case:
 
 FINE DETAILS:
-- Contravention Code: ${fineDetails.contravention_code}
-- Location: ${fineDetails.location}
-- Date: ${fineDetails.date}
+- Contravention Code: ${contraventionCode}
+- Location: ${fineDetails.location || 'Unknown'}
+- Date: ${fineDate}
 - Amount: ${fineAmount}
 - Reason: ${fineReason}
 
 APPEAL REASON:
-- Category: ${appealReason.category}
+- Category: ${userCategory}
 - Selected Reason: ${userSelectedReason}
-- Additional Details: ${additionalDetails}
+- Additional Details: ${userAdditionalDetails}
 
 Please analyze the strength of this appeal and provide your assessment in the following JSON format:
 {
