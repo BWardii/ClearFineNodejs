@@ -160,6 +160,12 @@ app.post('/api/appeal-check', async (req, res) => {
       });
     }
 
+    // NEW LOGGING ADDED: Check the raw input data to debug 'undefined' issue
+    console.log('--- Received Input Data ---');
+    console.log('fineDetails:', fineDetails);
+    console.log('appealReason:', appealReason);
+    console.log('---------------------------');
+
     const prompt = createAppealPrompt(fineDetails, appealReason);
     
     // Logging the full prompt to verify input data flow
@@ -195,16 +201,24 @@ app.post('/api/appeal-check', async (req, res) => {
     
     let appealAnalysis;
     
-    // Start of JSON cleaning fix
+    // NEW FIX: Aggressive JSON cleaning and extraction using regex
     let cleanResponse = response;
-    // Aggressively remove markdown code fences and surrounding whitespace/newlines
-    cleanResponse = cleanResponse.replace(/```json|```/g, '').trim(); 
-    // End of JSON cleaning fix
-    
+    const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/m); // Capture anything between the first { and the last }
+
+    if (jsonMatch && jsonMatch[0]) {
+      cleanResponse = jsonMatch[0];
+    } else {
+      // If the regex failed to find a clean JSON block, throw a specific error
+      console.error("FATAL CLEANING ERROR: Could not extract clean JSON block from AI response.");
+      throw new Error("AI response format was invalid and could not be parsed.");
+    }
+    // End NEW FIX
+
     try {
-      appealAnalysis = JSON.parse(cleanResponse); // Parse the cleaned string
+      appealAnalysis = JSON.parse(cleanResponse); // Parse the aggressively cleaned string
     } catch (parseError) {
-      console.error('ERROR: Failed to parse AI response to JSON:', response);
+      // Log the failed attempt with the original response content
+      console.error('ERROR: Failed to parse AI response to JSON:', response); 
       appealAnalysis = {
         appeal_strength: "medium",
         confidence_score: 50,
