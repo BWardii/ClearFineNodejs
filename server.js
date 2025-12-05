@@ -181,7 +181,7 @@ app.post('/api/appeal-check', async (req, res) => {
         }
       ],
       temperature: 0.7, // MODIFIED: Increased temperature for more variance
-      max_tokens: 500
+      max_tokens: 1024
     });
 
     const response = completion.choices[0].message.content;
