@@ -43,11 +43,13 @@ app.post('/api/extract-fine', async (req, res) => {
     console.log(`MIME: ${imageFile.mimetype}`);
     console.log(`Buffer size: ${imageBuffer.length} bytes`);
     
+    // Validate we have actual data
     if (!imageBuffer || imageBuffer.length === 0) {
       console.error('ERROR: Image buffer is empty');
       return res.status(400).json({ error: 'Image file is empty' });
     }
 
+    // Convert to base64
     const base64Image = imageBuffer.toString('base64');
     console.log(`Base64 length: ${base64Image.length}`);
 
@@ -58,6 +60,7 @@ app.post('/api/extract-fine', async (req, res) => {
 
     console.log('✓ Image data ready, calling OpenAI...');
 
+    // Call OpenAI Vision API
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -66,30 +69,14 @@ app.post('/api/extract-fine', async (req, res) => {
           content: [
             {
               type: "text",
-              text: `You are an expert at extracting parking fine information from official parking fine letters.
+              text: `Extract parking fine information from this image. Return JSON with:
+- fineAmount: numeric value (e.g., "65.00")
+- infractionDate: YYYY-MM-DD format
+- locationAddress: parking location
+- carRegistration: vehicle plate
+- fineReferenceNumber: ticket/reference number
 
-Extract the following fields from this parking fine image:
-
-1. fineAmount - The penalty charge amount (numeric value, e.g., "160" or "65.00")
-2. infractionDate - The date the violation occurred (format: YYYY-MM-DD)
-3. locationAddress - The exact parking location where violation occurred
-4. carRegistration - The VEHICLE REGISTRATION NUMBER (UK number plate format, e.g., "CH15ANN" or "RE22DTE"). 
-   IMPORTANT: Look for text like "Vehicle registration number:" or "Registration:" and extract the exact plate number shown.
-   This is usually clearly stated in the letter. Be very accurate.
-5. fineReferenceNumber - The ticket/reference number (e.g., "EF99300708")
-6. allegedContravention - The reason for the fine/alleged contravention (e.g., "52(m) Falling to comply with a prohibition on certain types of vehicle" or the full contravention text)
-
-Return ONLY a valid JSON object with these exact keys:
-{
-  "fineAmount": "value",
-  "infractionDate": "YYYY-MM-DD",
-  "locationAddress": "value",
-  "carRegistration": "value",
-  "fineReferenceNumber": "value",
-  "allegedContravention": "value"
-}
-
-NO markdown, NO code blocks, NO explanations. Only valid JSON.`
+Return ONLY valid JSON object, no markdown, no code blocks.`
             },
             {
               type: "image_url",
@@ -109,6 +96,7 @@ NO markdown, NO code blocks, NO explanations. Only valid JSON.`
     console.log('✓ OpenAI response received');
     let extractedText = response.choices[0].message.content;
 
+    // Remove markdown code blocks if present
     extractedText = extractedText
       .replace(/```json\n?/g, '')
       .replace(/```\n?/g, '')
@@ -116,6 +104,7 @@ NO markdown, NO code blocks, NO explanations. Only valid JSON.`
 
     console.log('Cleaned response:', extractedText);
 
+    // Parse JSON
     const extractedData = JSON.parse(extractedText);
     console.log('✓ Data extracted successfully');
 
@@ -126,8 +115,7 @@ NO markdown, NO code blocks, NO explanations. Only valid JSON.`
         infractionDate: extractedData.infractionDate || "",
         locationAddress: extractedData.locationAddress || "",
         carRegistration: extractedData.carRegistration || "",
-        fineReferenceNumber: extractedData.fineReferenceNumber || "",
-        allegedContravention: extractedData.allegedContravention || ""
+        fineReferenceNumber: extractedData.fineReferenceNumber || ""
       }
     });
 
@@ -145,14 +133,17 @@ app.post('/api/appeal-check', async (req, res) => {
   try {
     const { fineDetails, appealReason } = req.body;
     
+    // Validate request data
     if (!fineDetails || !appealReason) {
       return res.status(400).json({ 
         error: 'Missing required fields: fineDetails and appealReason are required' 
       });
     }
 
+    // Create the prompt for ChatGPT
     const prompt = createAppealPrompt(fineDetails, appealReason);
     
+    // Call ChatGPT API
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -171,10 +162,12 @@ app.post('/api/appeal-check', async (req, res) => {
 
     const response = completion.choices[0].message.content;
     
+    // Try to parse the JSON response
     let appealAnalysis;
     try {
       appealAnalysis = JSON.parse(response);
     } catch (parseError) {
+      // If JSON parsing fails, create a fallback response
       appealAnalysis = {
         appeal_strength: "medium",
         confidence_score: 50,
@@ -182,6 +175,7 @@ app.post('/api/appeal-check', async (req, res) => {
       };
     }
 
+    // Validate the response structure
     if (!appealAnalysis.appeal_strength || !appealAnalysis.confidence_score || !appealAnalysis.reasoning_summary) {
       throw new Error('Invalid response structure from AI');
     }
@@ -197,6 +191,7 @@ app.post('/api/appeal-check', async (req, res) => {
   }
 });
 
+// Helper function to create the prompt
 function createAppealPrompt(fineDetails, appealReason) {
   return `
 Please analyze this parking fine appeal case:
@@ -231,6 +226,7 @@ Respond with only the JSON object, no additional text.
   `.trim();
 }
 
+// Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
   res.status(500).json({ 
@@ -239,6 +235,7 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Start server
 app.listen(port, () => {
   console.log(`🚀 Appeal AI Backend running on port ${port}`);
   console.log(`📊 Health check: http://localhost:${port}/health`);
@@ -247,3 +244,4 @@ app.listen(port, () => {
 });
 
 module.exports = app;
+
