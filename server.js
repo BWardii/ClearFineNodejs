@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const fileUpload = require('express-fileupload');
 const OpenAI = require('openai');
 require('dotenv').config();
 
@@ -12,13 +11,9 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// Middleware
+// Middleware — 50 MB limit to accommodate base64-encoded fine images
 app.use(cors());
-app.use(express.json());
-app.use(fileUpload({
-  limits: { fileSize: 50 * 1024 * 1024 },
-  useTempFiles: false
-}));
+app.use(express.json({ limit: '50mb' }));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -29,31 +24,14 @@ app.get('/health', (req, res) => {
 app.post('/api/extract-fine', async (req, res) => {
   try {
     console.log('=== Extract Fine Request Received ===');
-    console.log('Files:', req.files ? Object.keys(req.files) : 'NONE');
-    
-    if (!req.files || !req.files.image) {
-      console.error('ERROR: No image file');
-      return res.status(400).json({ error: 'No image file provided' });
-    }
 
-    const imageFile = req.files.image;
-    const imageBuffer = imageFile.data;
+    const base64Image = req.body && req.body.image;
 
-    console.log(`File: ${imageFile.name}`);
-    console.log(`MIME: ${imageFile.mimetype}`);
-    console.log(`Buffer size: ${imageBuffer.length} bytes`);
-    
-    if (!imageBuffer || imageBuffer.length === 0) {
-      console.error('ERROR: Image buffer is empty');
-      return res.status(400).json({ error: 'Image file is empty' });
-    }
-
-    const base64Image = imageBuffer.toString('base64');
-    console.log(`Base64 length: ${base64Image.length}`);
+    console.log('Image received:', base64Image ? `${base64Image.length} base64 chars` : 'NONE');
 
     if (!base64Image || base64Image.length === 0) {
-      console.error('ERROR: Failed to encode to base64');
-      return res.status(400).json({ error: 'Failed to process image' });
+      console.error('ERROR: No image data in request body');
+      return res.status(400).json({ error: 'No image provided' });
     }
 
     console.log('✓ Image data ready, calling OpenAI...');
@@ -78,7 +56,7 @@ Return ONLY valid JSON object, no markdown, no code blocks.`
             {
               type: "image_url",
               image_url: {
-                url: `data:${imageFile.mimetype};base64,${base64Image}`,
+                url: `data:image/jpeg;base64,${base64Image}`,
                 detail: "auto"
               }
             }
@@ -91,14 +69,14 @@ Return ONLY valid JSON object, no markdown, no code blocks.`
     });
 
     console.log('✓ OpenAI response received');
-    
+
     // Logging usage
     console.log('OpenAI Usage/Tracking (Extract):', JSON.stringify({
       model: response.model,
       usage: response.usage,
       request_id: response.id
     }));
-    
+
     let extractedText = response.choices[0].message.content;
 
     // Remove markdown code blocks if present
