@@ -70,7 +70,6 @@ Return ONLY valid JSON object, no markdown, no code blocks.`
 
     console.log('✓ OpenAI response received');
 
-    // Logging usage
     console.log('OpenAI Usage/Tracking (Extract):', JSON.stringify({
       model: response.model,
       usage: response.usage,
@@ -79,7 +78,6 @@ Return ONLY valid JSON object, no markdown, no code blocks.`
 
     let extractedText = response.choices[0].message.content;
 
-    // Remove markdown code blocks if present
     extractedText = extractedText
       .replace(/```json\n?/g, '')
       .replace(/```\n?/g, '')
@@ -113,7 +111,7 @@ Return ONLY valid JSON object, no markdown, no code blocks.`
 // Appeal check endpoint
 app.post('/api/appeal-check', async (req, res) => {
   try {
-    const { fineDetails, appealReason } = req.body;
+    const { fineDetails, appealReason, personalReason } = req.body;
     
     if (!fineDetails || !appealReason) {
       return res.status(400).json({ 
@@ -121,16 +119,14 @@ app.post('/api/appeal-check', async (req, res) => {
       });
     }
 
-    // AUDIT LOG: Check raw input data
     console.log('--- Received Input Data ---');
     console.log('fineDetails:', fineDetails);
     console.log('appealReason:', appealReason);
+    console.log('personalReason:', personalReason);
     console.log('---------------------------');
 
-    // Create the prompt using the UPDATED helper function
-    const prompt = createAppealPrompt(fineDetails, appealReason);
-    
-    // AUDIT LOG: Check final prompt
+    const prompt = createAppealPrompt(fineDetails, appealReason, personalReason);
+
     console.log('--- Appeal Prompt Sent to AI ---');
     console.log(prompt);
     console.log('-------------------------------');
@@ -147,27 +143,23 @@ app.post('/api/appeal-check', async (req, res) => {
           content: prompt
         }
       ],
-      temperature: 0.7, 
-      max_tokens: 1024 
+      temperature: 0.7,
+      max_tokens: 1024
     });
 
     const response = completion.choices[0].message.content;
 
-    // AUDIT LOG: Usage
     console.log('OpenAI Usage/Tracking (Appeal):', JSON.stringify({
       model: completion.model,
       usage: completion.usage,
       request_id: completion.id
     }));
 
-    // --- ROBUST JSON EXTRACTION ---
     let appealAnalysis;
     let cleanResponse = response;
 
-    // Log the RAW response for debugging
     console.log('RAW OpenAI Response:', JSON.stringify(cleanResponse));
 
-    // Regex to find the first '{' and the last '}'
     const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/);
 
     if (jsonMatch) {
@@ -181,7 +173,6 @@ app.post('/api/appeal-check', async (req, res) => {
       appealAnalysis = JSON.parse(cleanResponse);
     } catch (parseError) {
       console.error('JSON Parse Error:', parseError.message);
-      // Fallback
       appealAnalysis = {
         appeal_strength: "medium",
         confidence_score: 50,
@@ -189,9 +180,8 @@ app.post('/api/appeal-check', async (req, res) => {
       };
     }
 
-    // Validate structure
     if (!appealAnalysis.appeal_strength || !appealAnalysis.confidence_score || !appealAnalysis.reasoning_summary) {
-       appealAnalysis = {
+      appealAnalysis = {
         appeal_strength: "medium",
         confidence_score: 50,
         reasoning_summary: "Response structure incomplete. Please review evidence."
@@ -209,28 +199,16 @@ app.post('/api/appeal-check', async (req, res) => {
   }
 });
 
-// --- UPDATED HELPER FUNCTION ---
-function createAppealPrompt(fineDetails, appealReason) {
-  // 1. Map Fine Details (Handling mismatch between 'date' vs 'time' and 'reason' vs 'type')
+function createAppealPrompt(fineDetails, appealReason, personalReason) {
   const fineReason = fineDetails.reason || fineDetails.description || fineDetails.type || 'Unknown';
   const fineDate = fineDetails.date || fineDetails.time || 'Unknown';
-  const fineAmount = fineDetails.amount || 'Unknown'; 
+  const fineAmount = fineDetails.amount || 'Unknown';
   const contraventionCode = fineDetails.contravention_code || 'Not specified';
-  
-  // 2. Map Appeal Reason (Handling incoming String VS incoming Object)
-  let userCategory = 'General';
-  let userSelectedReason = 'Unknown';
-  let userAdditionalDetails = 'None provided';
 
-  if (typeof appealReason === 'string') {
-    // If iOS sends just a string (e.g., "PCN Wrongly / Unfairly Issued")
-    userSelectedReason = appealReason;
-  } else if (typeof appealReason === 'object') {
-    // If iOS sends an object
-    userCategory = appealReason.category || 'General';
-    userSelectedReason = appealReason.selected_reason || appealReason.reason || 'Unknown';
-    userAdditionalDetails = appealReason.user_note || appealReason.personal_note || 'None provided';
-  }
+  // appealReason = category name (string sent from iOS)
+  // personalReason = the specific selected reason + any custom text typed by the user
+  const userCategory = (typeof appealReason === 'string') ? appealReason : (appealReason.category || 'General');
+  const userSelectedReason = personalReason || 'Not specified';
 
   return `
 Please analyze this parking fine appeal case:
@@ -240,12 +218,11 @@ FINE DETAILS:
 - Location: ${fineDetails.location || 'Unknown'}
 - Date: ${fineDate}
 - Amount: ${fineAmount}
-- Reason: ${fineReason}
+- Offense: ${fineReason}
 
-APPEAL REASON:
+APPEAL:
 - Category: ${userCategory}
-- Selected Reason: ${userSelectedReason}
-- Additional Details: ${userAdditionalDetails}
+- Reason: ${userSelectedReason}
 
 Please analyze the strength of this appeal and provide your assessment in the following JSON format:
 {
